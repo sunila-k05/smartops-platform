@@ -1,0 +1,43 @@
+version: "3.8"
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: smartops-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: smartops
+
+  backend:
+    build: ./backend
+    image: smartops-backend:local
+    container_name: smartops-backend
+    restart: on-failure
+    env_file:
+      - backend/.env
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+    networks:
+      - smartops-net
+
+  frontend:
+    build: ./frontend
+    image: smartops-frontend:local
+    container_name: smartops-frontend
+    restart: on-failure
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - smartops-net
+
+volumes:
+  mongo-data:
+
+networks:
+  smartops-net:
+    driver: bridge

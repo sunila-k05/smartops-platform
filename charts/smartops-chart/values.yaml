@@ -1,0 +1,17 @@
+replicaCount: 2
+
+backend:
+  image:
+    repository: "<YOUR_DOCKER_REPO>"
+    tag: "latest"
+  port: 5000
+
+frontend:
+  image:
+    repository: "<YOUR_DOCKER_REPO>"
+    tag: "latest"
+  port: 80
+
+service:
+  type: LoadBalancer
+  port: 80
