@@ -1,7 +1,7 @@
 pipeline {
   agent any
   environment {
-    DOCKERHUB_REPO = '<YOUR_DOCKER_REPO>' // e.g., yourdockerhub/smartops
+    DOCKERHUB_REPO = 'https://github.com/sunila-k05/smartops-platform' // e.g., yourdockerhub/smartops
     DOCKER_CRED = 'dockerhub-cred'
     AWS_CRED = 'aws-creds'
     TF_DIR = 'terraform/envs/dev'
@@ -35,7 +35,7 @@ pipeline {
     stage('K8s Deploy (optional)') {
       steps {
         sh '''
-          aws eks --region <AWS_REGION> update-kubeconfig --name smartops-eks
+          aws eks --region ap-south-1 update-kubeconfig --name smartops-eks
           helm upgrade --install smartops ${HELM_CHART} --namespace ${K8S_NAMESPACE} --create-namespace \
             --set backend.image.repository=${DOCKERHUB_REPO} --set backend.image.tag=backend-${BUILD_NUMBER} \
             --set frontend.image.repository=${DOCKERHUB_REPO} --set frontend.image.tag=frontend-${BUILD_NUMBER}
