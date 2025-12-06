@@ -1,11 +1,17 @@
-FROM node:18 AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
+FROM node:18-alpine
 
-FROM nginx:stable-alpine
-COPY --from=build /app/build /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+WORKDIR /app
+
+# Copy dependency files
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copy application source
+COPY . .
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=5s \
+  CMD wget -qO- http://localhost:5000/health || exit 1
+
+CMD ["npm", "start"]
