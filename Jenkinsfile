@@ -1,46 +1,131 @@
 pipeline {
-  agent any
-  environment {
-    DOCKERHUB_REPO = 'https://github.com/sunila-k05/smartops-platform' // e.g., yourdockerhub/smartops
-    DOCKER_CRED = 'dockerhub-cred'
-    AWS_CRED = 'aws-creds'
-    TF_DIR = 'terraform/envs/dev'
-    HELM_CHART = 'charts/smartops-chart'
-    K8S_NAMESPACE = 'smartops'
-  }
-  stages {
-    stage('Checkout') { steps { checkout scm } }
-    stage('Unit Test') { steps { sh 'cd backend && npm install && npm test || true' } }
-    stage('Docker Build & Push') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh '''
-            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-            docker build -t ${DOCKERHUB_REPO}:backend-${BUILD_NUMBER} backend
-            docker push ${DOCKERHUB_REPO}:backend-${BUILD_NUMBER}
-            docker build -t ${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER} frontend
-            docker push ${DOCKERHUB_REPO}:frontend-${BUILD_NUMBER}
-            docker logout
-          '''
+    agent any
+
+    environment {
+        // DockerHub Credentials
+        DOCKERHUB_USER = credentials('dockerhub-user')
+        DOCKERHUB_PASS = credentials('dockerhub-pass')
+
+        // Image Names
+        BACKEND_IMAGE  = "sunilak05/smartops-backend"
+        FRONTEND_IMAGE = "sunilak05/smartops-frontend"
+
+        // GitOps Repo
+        GITOPS_REPO = "git@github.com:sunila-k05/smartops-gitops.git"
+        GITOPS_BRANCH = "main"
+    }
+
+    stages {
+
+        /* ============================
+           CHECKOUT
+        ============================= */
+        stage('Checkout Source Code') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
-    stage('Terraform Apply (optional)') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "${AWS_CRED}"]]) {
-          dir("${TF_DIR}") { sh 'terraform init -input=false && terraform apply -auto-approve' }
+
+        /* ============================
+           INSTALL DEPENDENCIES + TEST
+        ============================= */
+        stage('Run Unit Tests') {
+            steps {
+                sh """
+                cd backend
+                npm install
+                npm test || true
+                """
+            }
         }
-      }
+
+        /* ============================
+           DOCKER BUILD BACKEND
+        ============================= */
+        stage('Build Backend Docker Image') {
+            steps {
+                sh """
+                cd backend
+                docker build -t ${BACKEND_IMAGE}:${BUILD_NUMBER} .
+                """
+            }
+        }
+
+        /* ============================
+           DOCKER BUILD FRONTEND
+        ============================= */
+        stage('Build Frontend Docker Image') {
+            steps {
+                sh """
+                cd frontend
+                docker build -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} .
+                """
+            }
+        }
+
+        /* ============================
+           TRIVY SCAN (OPTIONAL)
+        ============================= */
+        stage('Trivy Security Scan') {
+            steps {
+                sh """
+                trivy image ${BACKEND_IMAGE}:${BUILD_NUMBER} || true
+                trivy image ${FRONTEND_IMAGE}:${BUILD_NUMBER} || true
+                """
+            }
+        }
+
+        /* ============================
+           PUSH IMAGES TO DOCKERHUB
+        ============================= */
+        stage('Push Docker Images') {
+            steps {
+                sh """
+                echo ${DOCKERHUB_PASS} | docker login -u ${DOCKERHUB_USER} --password-stdin
+
+                docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                """
+            }
+        }
+
+        /* ============================
+           UPDATE GITOPS REPO
+        ============================= */
+        stage('Update GitOps Repo (Image Tags)') {
+            steps {
+                sshagent(['github']) {
+
+                    sh """
+                    # Clone the GitOps repo
+                    rm -rf gitops
+                    git clone ${GITOPS_REPO} gitops
+                    cd gitops
+
+                    echo "Updating backend image tag..."
+                    sed -i "s|image: .*backend.*|image: ${BACKEND_IMAGE}:${BUILD_NUMBER}|g" backend/deployment.yaml
+
+                    echo "Updating frontend image tag..."
+                    sed -i "s|image: .*frontend.*|image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}|g" frontend/deployment.yaml
+
+                    git config user.email "jenkins@smartops.com"
+                    git config user.name "Jenkins"
+
+                    git add .
+                    git commit -m "Update images to build ${BUILD_NUMBER}"
+                    git push origin ${GITOPS_BRANCH}
+                    """
+                }
+            }
+        }
     }
-    stage('K8s Deploy (optional)') {
-      steps {
-        sh '''
-          aws eks --region ap-south-1 update-kubeconfig --name smartops-eks
-          helm upgrade --install smartops ${HELM_CHART} --namespace ${K8S_NAMESPACE} --create-namespace \
-            --set backend.image.repository=${DOCKERHUB_REPO} --set backend.image.tag=backend-${BUILD_NUMBER} \
-            --set frontend.image.repository=${DOCKERHUB_REPO} --set frontend.image.tag=frontend-${BUILD_NUMBER}
-        '''
-      }
+
+    post {
+        success {
+            echo "CI/CD Completed Successfully! ArgoCD will now deploy automatically."
+        }
+        failure {
+            echo "Pipeline Failed"
+        }
     }
-  }
 }
