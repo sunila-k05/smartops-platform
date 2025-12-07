@@ -2,29 +2,20 @@ pipeline {
     agent any
 
     environment {
-        // -----------------------------
-        // DockerHub Credentials
-        // -----------------------------
         DOCKERHUB_USER = 'sunilak05'
         DOCKERHUB_PASS = credentials('dockerhub-pass')
 
-        // -----------------------------
-        // Image names
-        // -----------------------------
         BACKEND_IMAGE  = "sunilak05/smartops-backend"
         FRONTEND_IMAGE = "sunilak05/smartops-frontend"
 
-        // -----------------------------
-        // GitOps Repo
-        // -----------------------------
-        GITOPS_REPO = "git@github.com:sunila-k05/smartops-gitops.git"
+        GITOPS_REPO   = "git@github.com:sunila-k05/smartops-gitops.git"
         GITOPS_BRANCH = "main"
     }
 
     stages {
 
         /* =====================================
-                     CHECKOUT SOURCE
+                     CHECKOUT
         ===================================== */
         stage('Checkout') {
             steps {
@@ -33,39 +24,39 @@ pipeline {
         }
 
         /* =====================================
-                     UNIT TESTS (Backend)
+                     UNIT TESTS
         ===================================== */
         stage('Unit Tests') {
             steps {
-                sh """
+                sh '''
                 cd backend
                 npm install
                 npm test || true
-                """
+                '''
             }
         }
 
         /* =====================================
-                   BUILD BACKEND IMAGE
+              BUILD BACKEND DOCKER IMAGE
         ===================================== */
         stage('Build Backend Image') {
             steps {
-                sh """
+                sh '''
                 cd backend
                 docker build -t ${BACKEND_IMAGE}:${BUILD_NUMBER} .
-                """
+                '''
             }
         }
 
         /* =====================================
-                   BUILD FRONTEND IMAGE
+              BUILD FRONTEND DOCKER IMAGE
         ===================================== */
         stage('Build Frontend Image') {
             steps {
-                sh """
+                sh '''
                 cd frontend
-                docker build -t ${ FRONTEND_IMAGE }:${BUILD_NUMBER} .
-                """
+                docker build -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} .
+                '''
             }
         }
 
@@ -74,9 +65,9 @@ pipeline {
         ===================================== */
         stage('Docker Login') {
             steps {
-                sh """
+                sh '''
                 echo ${DOCKERHUB_PASS} | docker login -u ${DOCKERHUB_USER} --password-stdin
-                """
+                '''
             }
         }
 
@@ -85,37 +76,41 @@ pipeline {
         ===================================== */
         stage('Push Images') {
             steps {
-                sh """
+                sh '''
                 docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
                 docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
-                """
+                '''
             }
         }
 
         /* =====================================
-                UPDATE GITOPS (MANIFESTS)
+                    UPDATE GITOPS
         ===================================== */
         stage('Update GitOps Repo') {
             steps {
-                sshagent(['github']) {
-                    sh """
+                sshagent(['git']) {   // <<--- use your SSH credential ID
+                    sh '''
+                    # ----- prevent host key verification failed -----
+                    mkdir -p ~/.ssh
+                    ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+                    # ----- clone repo -----
                     rm -rf gitops
                     git clone ${GITOPS_REPO} gitops
                     cd gitops
 
-                    echo "Updating backend image tag..."
+                    # ----- update image tags -----
                     sed -i "s|image:.*smartops-backend.*|image: ${BACKEND_IMAGE}:${BUILD_NUMBER}|g" backend/deployment.yaml
-
-                    echo "Updating frontend image tag..."
                     sed -i "s|image:.*smartops-frontend.*|image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}|g" frontend/deployment.yaml
 
+                    # ----- commit & push -----
                     git config user.email "jenkins@smartops.com"
                     git config user.name "Jenkins"
 
                     git add .
-                    git commit -m "Update images to build ${BUILD_NUMBER}"
+                    git commit -m "Update images to build ${BUILD_NUMBER}" || true
                     git push origin ${GITOPS_BRANCH}
-                    """
+                    '''
                 }
             }
         }
