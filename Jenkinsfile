@@ -2,34 +2,40 @@ pipeline {
     agent any
 
     environment {
+        // -----------------------------
         // DockerHub Credentials
-        DOCKERHUB_USER = credentials('dockerhub-user')
+        // -----------------------------
+        DOCKERHUB_USER = 'sunilak05'
         DOCKERHUB_PASS = credentials('dockerhub-pass')
 
-        // Image Names
+        // -----------------------------
+        // Image names
+        // -----------------------------
         BACKEND_IMAGE  = "sunilak05/smartops-backend"
         FRONTEND_IMAGE = "sunilak05/smartops-frontend"
 
+        // -----------------------------
         // GitOps Repo
+        // -----------------------------
         GITOPS_REPO = "git@github.com:sunila-k05/smartops-gitops.git"
         GITOPS_BRANCH = "main"
     }
 
     stages {
 
-        /* ============================
-           CHECKOUT
-        ============================= */
-        stage('Checkout Source Code') {
+        /* =====================================
+                     CHECKOUT SOURCE
+        ===================================== */
+        stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        /* ============================
-           INSTALL DEPENDENCIES + TEST
-        ============================= */
-        stage('Run Unit Tests') {
+        /* =====================================
+                     UNIT TESTS (Backend)
+        ===================================== */
+        stage('Unit Tests') {
             steps {
                 sh """
                 cd backend
@@ -39,10 +45,10 @@ pipeline {
             }
         }
 
-        /* ============================
-           DOCKER BUILD BACKEND
-        ============================= */
-        stage('Build Backend Docker Image') {
+        /* =====================================
+                   BUILD BACKEND IMAGE
+        ===================================== */
+        stage('Build Backend Image') {
             steps {
                 sh """
                 cd backend
@@ -51,62 +57,57 @@ pipeline {
             }
         }
 
-        /* ============================
-           DOCKER BUILD FRONTEND
-        ============================= */
-        stage('Build Frontend Docker Image') {
+        /* =====================================
+                   BUILD FRONTEND IMAGE
+        ===================================== */
+        stage('Build Frontend Image') {
             steps {
                 sh """
                 cd frontend
-                docker build -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} .
+                docker build -t ${ FRONTEND_IMAGE }:${BUILD_NUMBER} .
                 """
             }
         }
 
-        /* ============================
-           TRIVY SCAN (OPTIONAL)
-        ============================= */
-        stage('Trivy Security Scan') {
-            steps {
-                sh """
-                trivy image ${BACKEND_IMAGE}:${BUILD_NUMBER} || true
-                trivy image ${FRONTEND_IMAGE}:${BUILD_NUMBER} || true
-                """
-            }
-        }
-
-        /* ============================
-           PUSH IMAGES TO DOCKERHUB
-        ============================= */
-        stage('Push Docker Images') {
+        /* =====================================
+                      DOCKER LOGIN
+        ===================================== */
+        stage('Docker Login') {
             steps {
                 sh """
                 echo ${DOCKERHUB_PASS} | docker login -u ${DOCKERHUB_USER} --password-stdin
+                """
+            }
+        }
 
+        /* =====================================
+                     PUSH IMAGES
+        ===================================== */
+        stage('Push Images') {
+            steps {
+                sh """
                 docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
                 docker push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
                 """
             }
         }
 
-        /* ============================
-           UPDATE GITOPS REPO
-        ============================= */
-        stage('Update GitOps Repo (Image Tags)') {
+        /* =====================================
+                UPDATE GITOPS (MANIFESTS)
+        ===================================== */
+        stage('Update GitOps Repo') {
             steps {
                 sshagent(['github']) {
-
                     sh """
-                    # Clone the GitOps repo
                     rm -rf gitops
                     git clone ${GITOPS_REPO} gitops
                     cd gitops
 
                     echo "Updating backend image tag..."
-                    sed -i "s|image: .*backend.*|image: ${BACKEND_IMAGE}:${BUILD_NUMBER}|g" backend/deployment.yaml
+                    sed -i "s|image:.*smartops-backend.*|image: ${BACKEND_IMAGE}:${BUILD_NUMBER}|g" backend/deployment.yaml
 
                     echo "Updating frontend image tag..."
-                    sed -i "s|image: .*frontend.*|image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}|g" frontend/deployment.yaml
+                    sed -i "s|image:.*smartops-frontend.*|image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}|g" frontend/deployment.yaml
 
                     git config user.email "jenkins@smartops.com"
                     git config user.name "Jenkins"
@@ -122,10 +123,10 @@ pipeline {
 
     post {
         success {
-            echo "CI/CD Completed Successfully! ArgoCD will now deploy automatically."
+            echo "PIPELINE SUCCESS — GitOps updated, ArgoCD will deploy automatically."
         }
         failure {
-            echo "Pipeline Failed"
+            echo "PIPELINE FAILED"
         }
     }
 }
