@@ -2,12 +2,15 @@ pipeline {
     agent any
 
     environment {
+        // DockerHub
         DOCKERHUB_USER = 'sunilak05'
         DOCKERHUB_PASS = credentials('dockerhub-pass')
 
+        // Images
         BACKEND_IMAGE  = "sunilak05/smartops-backend"
         FRONTEND_IMAGE = "sunilak05/smartops-frontend"
 
+        // GitOps repo
         GITOPS_REPO   = "git@github.com:sunila-k05/smartops-gitops.git"
         GITOPS_BRANCH = "main"
     }
@@ -17,7 +20,7 @@ pipeline {
         /* =====================================
                      CHECKOUT
         ===================================== */
-        stage('Checkout') {
+        stage('Checkout Source') {
             steps {
                 checkout scm
             }
@@ -26,7 +29,7 @@ pipeline {
         /* =====================================
                      UNIT TESTS
         ===================================== */
-        stage('Unit Tests') {
+        stage('Unit Tests (Backend)') {
             steps {
                 sh '''
                 cd backend
@@ -37,7 +40,7 @@ pipeline {
         }
 
         /* =====================================
-              BUILD BACKEND DOCKER IMAGE
+              BUILD BACKEND IMAGE
         ===================================== */
         stage('Build Backend Image') {
             steps {
@@ -49,7 +52,7 @@ pipeline {
         }
 
         /* =====================================
-              BUILD FRONTEND DOCKER IMAGE
+              BUILD FRONTEND IMAGE
         ===================================== */
         stage('Build Frontend Image') {
             steps {
@@ -74,7 +77,7 @@ pipeline {
         /* =====================================
                      PUSH IMAGES
         ===================================== */
-        stage('Push Images') {
+        stage('Push Images to DockerHub') {
             steps {
                 sh '''
                 docker push ${BACKEND_IMAGE}:${BUILD_NUMBER}
@@ -84,26 +87,26 @@ pipeline {
         }
 
         /* =====================================
-                    UPDATE GITOPS
+                UPDATE GITOPS REPO
         ===================================== */
         stage('Update GitOps Repo') {
             steps {
-                sshagent(['git']) {   // <<--- use your SSH credential ID
+                sshagent(['github']) {    // <- FIXED CREDENTIAL ID
                     sh '''
-                    # ----- prevent host key verification failed -----
+                    # Ensure SSH known_hosts is ready
                     mkdir -p ~/.ssh
                     ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-                    # ----- clone repo -----
+                    # Clone repo fresh
                     rm -rf gitops
                     git clone ${GITOPS_REPO} gitops
                     cd gitops
 
-                    # ----- update image tags -----
+                    # Update image tags in manifests
                     sed -i "s|image:.*smartops-backend.*|image: ${BACKEND_IMAGE}:${BUILD_NUMBER}|g" backend/deployment.yaml
                     sed -i "s|image:.*smartops-frontend.*|image: ${FRONTEND_IMAGE}:${BUILD_NUMBER}|g" frontend/deployment.yaml
 
-                    # ----- commit & push -----
+                    # Commit & push changes
                     git config user.email "jenkins@smartops.com"
                     git config user.name "Jenkins"
 
@@ -118,10 +121,10 @@ pipeline {
 
     post {
         success {
-            echo "PIPELINE SUCCESS — GitOps updated, ArgoCD will deploy automatically."
+            echo "✔ PIPELINE SUCCESS — GitOps updated. ArgoCD will sync automatically."
         }
         failure {
-            echo "PIPELINE FAILED"
+            echo "✘ PIPELINE FAILED — Check logs for details."
         }
     }
 }
